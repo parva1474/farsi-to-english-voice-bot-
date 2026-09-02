@@ -9,40 +9,43 @@ export default {
     try {
       const update = await request.json();
 
-      if (update.message) {
+      if (update.message && update.message.voice) {
         const chatId = update.message.chat.id;
+        const fileId = update.message.voice.file_id;
+        
+        await sendTelegramMessage(chatId, "⏳ ویس شما دریافت شد. در حال شبیه‌سازی صدا و ترجمه...");
 
-        // بررسی اینکه آیا پیام ویس (Voice) است
-        if (update.message.voice) {
-          const fileId = update.message.voice.file_id;
-          
-          await sendTelegramMessage(chatId, "⏳ ویس شما دریافت شد. در حال پردازش و ترجمه...");
+        // ۱. دریافت فایل صوتی از تلگرام
+        const fileUrl = await getTelegramFileUrl(fileId);
+        const audioBuffer = await downloadFile(fileUrl);
 
-          // ۱. دریافت لینک دانلود فایل از تلگرام
-          const fileUrl = await getTelegramFileUrl(fileId);
-          const audioBuffer = await downloadFile(fileUrl);
-
-          // ۲. تبدیل صوت فارسی به متن با OpenAI Whisper
-          const persianText = await transcribeAudioWithOpenAI(audioBuffer, env.OPENAI_API_KEY);
-          
-          if (!persianText) {
-            await sendTelegramMessage(chatId, "خطا در پردازش و تشخیص متن ویس.");
-            return new Response("OK", { status: 200 });
-          }
-
-          // ۳. ترجمه متن فارسی به انگلیسی (می‌توانید از ترجمه هوش مصنوعی یا گوگل استفاده کنید)
-          const englishText = await translateText(persianText, env.OPENAI_API_KEY);
-
-          // ۴. تولید ویس انگلیسی با شبیه‌سازی صدا توسط ElevenLabs
-          const clonedVoiceBuffer = await generateClonedVoice(englishText, env.ELEVENLABS_API_KEY, env.ELEvenLABS_VOICE_ID);
-
-          // ۵. ارسال ویس نهایی به کاربر در تلگرام
-          await sendTelegramVoice(chatId, clonedVoiceBuffer);
-
-        } else if (update.message.text) {
-          const text = update.message.text;
-          await sendTelegramMessage(chatId, `پیام شما دریافت شد: ${text}\nلطفاً یک ویس فارسی بفرستید.`);
+        // ۲. تبدیل صوت فارسی به متن با OpenAI Whisper
+        const persianText = await transcribeAudioWithOpenAI(audioBuffer, env.OPENAI_API_KEY);
+        
+        if (!persianText) {
+          await sendTelegramMessage(chatId, "خطا در تشخیص متن ویس.");
+          return new Response("OK", { status: 200 });
         }
+
+        // ۳. ترجمه متن فارسی به انگلیسی
+        const englishText = await translateText(persianText, env.OPENAI_API_KEY);
+
+        // ۴. ساخت صدای آنی (Instant Voice Cloning) از روی ویس کاربر در ElevenLabs
+        const tempVoiceId = await createInstantVoice(audioBuffer, env.ELEVENLABS_API_KEY);
+
+        if (!tempVoiceId) {
+          await sendTelegramMessage(chatId, "خطا در شبیه‌سازی صدا.");
+          return new Response("OK", { status: 200 });
+        }
+
+        // ۵. تولید ویس انگلیسی با همان صدای شبیه‌سازی‌شده
+        const clonedVoiceBuffer = await generateClonedVoice(englishText, env.ELEVENLABS_API_KEY, tempVoiceId);
+
+        // ۶. ارسال ویس نهایی به کاربر در تلگرام
+        await sendTelegramVoice(chatId, clonedVoiceBuffer);
+
+        // ۷. پاکسازی صدای موقت از ایون‌لبز برای جلوگیری از انباشت صداها (اختیاری)
+        ctx.waitUntil(deleteInstantVoice(tempVoiceId, env.ELEVENLABS_API_KEY));
       }
 
       return new Response("OK", { status: 200 });
@@ -65,13 +68,11 @@ async function getTelegramFileUrl(fileId) {
   const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
   const data = await res.json();
   const filePath = data.result.file_path;
-  return `https://api.telegram.org/api/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`; // اصلاح مسیر دانلود در ادامه یا استفاده از api.telegram.org
+  return `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`;
 }
 
 async function downloadFile(url) {
-  // تصحیح مسیر سرور تلگرام برای دانلود
-  const fixedUrl = url.replace('api.telegram.org/api/file', 'api.telegram.org/file');
-  const res = await fetch(fixedUrl);
+  const res = await fetch(url);
   return await res.arrayBuffer();
 }
 
@@ -110,6 +111,21 @@ async function translateText(text, apiKey) {
   return data.choices[0].message.content.trim();
 }
 
+async function createInstantVoice(audioBuffer, apiKey) {
+  const formData = new FormData();
+  const blob = new Blob([audioBuffer], { type: 'audio/ogg' });
+  formData.append('name', `UserVoice_${Date.now()}`);
+  formData.append('files', blob, 'sample.ogg');
+
+  const res = await fetch('https://api.elevenlabs.io/v1/voices/add', {
+    method: 'POST',
+    headers: { 'xi-api-key': apiKey },
+    body: formData,
+  });
+  const data = await res.json();
+  return data.voice_id;
+}
+
 async function generateClonedVoice(text, apiKey, voiceId) {
   const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
     method: 'POST',
@@ -136,5 +152,12 @@ async function sendTelegramVoice(chatId, audioBuffer) {
   await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendVoice`, {
     method: 'POST',
     body: formData,
+  });
+}
+
+async function deleteInstantVoice(voiceId, apiKey) {
+  await fetch(`https://api.elevenlabs.io/v1/voices/${voiceId}`, {
+    method: 'DELETE',
+    headers: { 'xi-api-key': apiKey }
   });
 }
