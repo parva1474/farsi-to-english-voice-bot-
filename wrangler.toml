@@ -1,0 +1,3 @@
+name = "farsi-to-english-voice-bot"
+main = "src/index.js"
+compatibility_date = "2026-09-02"
