@@ -2,7 +2,7 @@
 // Farsi → English Voice Translator + Voice Cloning Bot
 // Cloudflare Workers
 //
-// Secrets required in Cloudflare:
+// Required Cloudflare Secrets:
 //
 // BOT_TOKEN
 // OPENAI_API_KEY
@@ -14,36 +14,47 @@ export default {
 
   async fetch(request, env, ctx) {
 
+    // ==========================================================
+    // 1. BASIC REQUEST LOG
+    // ==========================================================
+
     console.log("========================================");
-    console.log("🔥 WORKER STARTED");
+    console.log("🔥 FARSİ VOICE BOT STARTED");
     console.log("METHOD:", request.method);
     console.log("URL:", request.url);
     console.log("========================================");
 
 
-    // ----------------------------------------------------------
-    // Check required secrets
-    // ----------------------------------------------------------
+    // ==========================================================
+    // 2. SECRET AVAILABILITY TEST
+    // IMPORTANT:
+    // We NEVER print the actual secret values.
+    // Only true / false is logged.
+    // ==========================================================
 
-    if (!env.BOT_TOKEN) {
-      console.error("❌ BOT_TOKEN is missing");
-      return new Response("BOT_TOKEN is missing", { status: 500 });
-    }
+    const hasBotToken =
+      typeof env.BOT_TOKEN === "string" &&
+      env.BOT_TOKEN.length > 0;
 
-    if (!env.OPENAI_API_KEY) {
-      console.error("❌ OPENAI_API_KEY is missing");
-      return new Response("OPENAI_API_KEY is missing", { status: 500 });
-    }
+    const hasOpenAIKey =
+      typeof env.OPENAI_API_KEY === "string" &&
+      env.OPENAI_API_KEY.length > 0;
 
-    if (!env.ELEVENLABS_API_KEY) {
-      console.error("❌ ELEVENLABS_API_KEY is missing");
-      return new Response("ELEVENLABS_API_KEY is missing", { status: 500 });
-    }
+    const hasElevenLabsKey =
+      typeof env.ELEVENLABS_API_KEY === "string" &&
+      env.ELEVENLABS_API_KEY.length > 0;
 
 
-    // ----------------------------------------------------------
-    // GET request
-    // ----------------------------------------------------------
+    console.log("🔐 SECRET TEST");
+    console.log("BOT_TOKEN:", hasBotToken);
+    console.log("OPENAI_API_KEY:", hasOpenAIKey);
+    console.log("ELEVENLABS_API_KEY:", hasElevenLabsKey);
+    console.log("========================================");
+
+
+    // ==========================================================
+    // 3. GET REQUEST
+    // ==========================================================
 
     if (request.method === "GET") {
 
@@ -51,142 +62,291 @@ export default {
 
       return new Response(
         "Farsi Voice Translator Bot is running!",
-        { status: 200 }
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "text/plain; charset=UTF-8"
+          }
+        }
       );
     }
 
 
-    // ----------------------------------------------------------
-    // Only POST is accepted from Telegram
-    // ----------------------------------------------------------
+    // ==========================================================
+    // 4. TELEGRAM REQUIRES BOT TOKEN
+    // ==========================================================
+
+    if (!hasBotToken) {
+
+      console.error("❌ BOT_TOKEN is NOT available in env");
+
+      return new Response(
+        "BOT_TOKEN is missing",
+        { status: 500 }
+      );
+    }
+
+
+    // ==========================================================
+    // 5. ONLY POST IS EXPECTED FROM TELEGRAM
+    // ==========================================================
 
     if (request.method !== "POST") {
 
-      console.log("⚠️ Unsupported method:", request.method);
+      console.log(
+        "⚠️ Unsupported HTTP method:",
+        request.method
+      );
 
-      return new Response("OK", { status: 200 });
+      return new Response("OK", {
+        status: 200
+      });
     }
 
+
+    // ==========================================================
+    // 6. READ TELEGRAM UPDATE
+    // ==========================================================
 
     let update = null;
 
     try {
 
-      // --------------------------------------------------------
-      // Read Telegram update
-      // --------------------------------------------------------
-
       update = await request.json();
 
-      console.log("========================================");
-      console.log("📩 TELEGRAM UPDATE:");
-      console.log(JSON.stringify(update));
-      console.log("========================================");
+      console.log("📩 TELEGRAM UPDATE RECEIVED");
 
+      console.log(
+        JSON.stringify(update)
+      );
+
+
+      // ========================================================
+      // 7. MESSAGE CHECK
+      // ========================================================
 
       const message = update?.message;
 
       if (!message) {
 
-        console.log("⚠️ No message inside update");
+        console.log(
+          "⚠️ Telegram update has no message"
+        );
 
-        return new Response("OK", { status: 200 });
+        return new Response("OK", {
+          status: 200
+        });
       }
 
 
-      const chatId = message.chat?.id;
+      const chatId =
+        message?.chat?.id;
+
 
       if (!chatId) {
 
-        console.error("❌ chat_id not found");
-
-        return new Response("OK", { status: 200 });
-      }
-
-
-      // ========================================================
-      // /start
-      // ========================================================
-
-      if (message.text === "/start") {
-
-        console.log("🚀 /start received");
-
-        await sendTelegramMessage(
-          env.BOT_TOKEN,
-          chatId,
-          "سلام 👋\n\nویس فارسی خودت را برای من بفرست.\n\nمن:\n🎤 صدای تو را دریافت می‌کنم\n📝 فارسی را به متن تبدیل می‌کنم\n🇬🇧 آن را به انگلیسی طبیعی ترجمه می‌کنم\n🗣️ با صدای خودت انگلیسی صحبت می‌کنم\n\n⏳ لطفاً ویس را ارسال کن."
+        console.error(
+          "❌ chat_id not found"
         );
 
-        console.log("✅ /start response sent");
-
-        return new Response("OK", { status: 200 });
+        return new Response("OK", {
+          status: 200
+        });
       }
 
 
+      console.log(
+        "💬 CHAT ID:",
+        chatId
+      );
+
+
       // ========================================================
-      // Text messages
+      // 8. /start
       // ========================================================
 
-      if (message.text) {
+      if (
+        typeof message.text === "string" &&
+        message.text.trim() === "/start"
+      ) {
 
-        console.log("📝 TEXT RECEIVED:", message.text);
+        console.log("🚀 /start RECEIVED");
+
 
         await sendTelegramMessage(
           env.BOT_TOKEN,
           chatId,
+
+          "سلام 👋\n\n" +
+          "ویس فارسی خودت را برای من بفرست.\n\n" +
+
+          "من:\n" +
+          "🎤 صدای تو را دریافت می‌کنم\n" +
+          "📝 فارسی را به متن تبدیل می‌کنم\n" +
+          "🇬🇧 آن را به انگلیسی طبیعی ترجمه می‌کنم\n" +
+          "🗣️ با صدای خودت انگلیسی صحبت می‌کنم\n\n" +
+
+          "⏳ لطفاً ویس را ارسال کن."
+        );
+
+
+        console.log(
+          "✅ /start RESPONSE SENT"
+        );
+
+
+        return new Response("OK", {
+          status: 200
+        });
+      }
+
+
+      // ========================================================
+      // 9. OTHER TEXT MESSAGES
+      // ========================================================
+
+      if (
+        typeof message.text === "string"
+      ) {
+
+        console.log(
+          "📝 TEXT RECEIVED:",
+          message.text
+        );
+
+
+        await sendTelegramMessage(
+          env.BOT_TOKEN,
+          chatId,
+
           "🎤 لطفاً یک ویس فارسی برای من بفرست."
         );
 
-        return new Response("OK", { status: 200 });
+
+        console.log(
+          "✅ TEXT RESPONSE SENT"
+        );
+
+
+        return new Response("OK", {
+          status: 200
+        });
       }
 
 
       // ========================================================
-      // Voice
+      // 10. VOICE
       // ========================================================
 
       if (message.voice) {
 
+        console.log("========================================");
         console.log("🎤 VOICE RECEIVED");
-
-        const fileId = message.voice.file_id;
-
-        console.log("Telegram file_id:", fileId);
+        console.log("========================================");
 
 
         // ------------------------------------------------------
-        // Tell user that processing started
+        // Check APIs required for voice processing
+        // ------------------------------------------------------
+
+        if (!hasOpenAIKey) {
+
+          console.error(
+            "❌ OPENAI_API_KEY is missing"
+          );
+
+
+          await sendTelegramMessage(
+            env.BOT_TOKEN,
+            chatId,
+
+            "❌ کلید OpenAI روی سرور تنظیم نشده است."
+          );
+
+
+          return new Response("OK", {
+            status: 200
+          });
+        }
+
+
+        if (!hasElevenLabsKey) {
+
+          console.error(
+            "❌ ELEVENLABS_API_KEY is missing"
+          );
+
+
+          await sendTelegramMessage(
+            env.BOT_TOKEN,
+            chatId,
+
+            "❌ کلید ElevenLabs روی سرور تنظیم نشده است."
+          );
+
+
+          return new Response("OK", {
+            status: 200
+          });
+        }
+
+
+        const fileId =
+          message.voice.file_id;
+
+
+        console.log(
+          "Telegram file_id:",
+          fileId
+        );
+
+
+        // ------------------------------------------------------
+        // Processing message
         // ------------------------------------------------------
 
         await sendTelegramMessage(
           env.BOT_TOKEN,
           chatId,
-          "⏳ ویس شما دریافت شد.\nدر حال پردازش، ترجمه و ساخت صدای انگلیسی..."
+
+          "⏳ ویس شما دریافت شد.\n" +
+          "در حال پردازش، ترجمه و ساخت صدای انگلیسی..."
         );
 
 
-        // ------------------------------------------------------
-        // Get Telegram file URL
-        // ------------------------------------------------------
+        // ======================================================
+        // STEP 1 — Telegram getFile
+        // ======================================================
 
-        console.log("1️⃣ Getting Telegram file...");
-
-        const fileUrl = await getTelegramFileUrl(
-          env.BOT_TOKEN,
-          fileId
+        console.log(
+          "1️⃣ Getting Telegram file..."
         );
 
-        console.log("✅ Telegram file URL received");
+
+        const fileUrl =
+          await getTelegramFileUrl(
+            env.BOT_TOKEN,
+            fileId
+          );
 
 
-        // ------------------------------------------------------
-        // Download voice
-        // ------------------------------------------------------
+        console.log(
+          "✅ Telegram file URL received"
+        );
 
-        console.log("2️⃣ Downloading voice...");
 
-        const audioBuffer = await downloadFile(fileUrl);
+        // ======================================================
+        // STEP 2 — Download voice
+        // ======================================================
+
+        console.log(
+          "2️⃣ Downloading voice..."
+        );
+
+
+        const audioBuffer =
+          await downloadFile(fileUrl);
+
 
         console.log(
           "✅ Voice downloaded. Bytes:",
@@ -194,11 +354,14 @@ export default {
         );
 
 
-        // ------------------------------------------------------
-        // Whisper
-        // ------------------------------------------------------
+        // ======================================================
+        // STEP 3 — Whisper
+        // ======================================================
 
-        console.log("3️⃣ Sending audio to OpenAI Whisper...");
+        console.log(
+          "3️⃣ Sending audio to OpenAI Whisper..."
+        );
+
 
         const persianText =
           await transcribeAudioWithOpenAI(
@@ -206,28 +369,42 @@ export default {
             env.OPENAI_API_KEY
           );
 
-        console.log("📝 Persian transcription:", persianText);
+
+        console.log(
+          "📝 Persian transcription:",
+          persianText
+        );
 
 
         if (!persianText) {
 
-          console.error("❌ Whisper returned empty text");
+          console.error(
+            "❌ Whisper returned empty text"
+          );
+
 
           await sendTelegramMessage(
             env.BOT_TOKEN,
             chatId,
+
             "❌ نتوانستم صدای شما را تشخیص بدهم."
           );
 
-          return new Response("OK", { status: 200 });
+
+          return new Response("OK", {
+            status: 200
+          });
         }
 
 
-        // ------------------------------------------------------
-        // Translate Persian → English
-        // ------------------------------------------------------
+        // ======================================================
+        // STEP 4 — Persian → English
+        // ======================================================
 
-        console.log("4️⃣ Translating Persian → English...");
+        console.log(
+          "4️⃣ Translating Persian → English..."
+        );
+
 
         const englishText =
           await translateText(
@@ -235,7 +412,11 @@ export default {
             env.OPENAI_API_KEY
           );
 
-        console.log("🇬🇧 English:", englishText);
+
+        console.log(
+          "🇬🇧 English:",
+          englishText
+        );
 
 
         if (!englishText) {
@@ -246,28 +427,34 @@ export default {
         }
 
 
-        // ------------------------------------------------------
-        // Show translation to user
-        // ------------------------------------------------------
+        // ======================================================
+        // STEP 5 — Show translation
+        // ======================================================
 
         await sendTelegramMessage(
           env.BOT_TOKEN,
           chatId,
-          "🇬🇧 ترجمه:\n\n" + englishText
+
+          "🇬🇧 ترجمه:\n\n" +
+          englishText
         );
 
 
-        // ------------------------------------------------------
-        // Clone user's voice
-        // ------------------------------------------------------
+        // ======================================================
+        // STEP 6 — Clone voice
+        // ======================================================
 
-        console.log("5️⃣ Creating temporary ElevenLabs voice...");
+        console.log(
+          "5️⃣ Creating temporary ElevenLabs voice..."
+        );
+
 
         const tempVoiceId =
           await createInstantVoice(
             audioBuffer,
             env.ELEVENLABS_API_KEY
           );
+
 
         console.log(
           "✅ Temporary voice created:",
@@ -283,11 +470,14 @@ export default {
         }
 
 
-        // ------------------------------------------------------
-        // Generate English voice
-        // ------------------------------------------------------
+        // ======================================================
+        // STEP 7 — Generate English speech
+        // ======================================================
 
-        console.log("6️⃣ Generating English speech...");
+        console.log(
+          "6️⃣ Generating English speech..."
+        );
+
 
         const clonedVoiceBuffer =
           await generateClonedVoice(
@@ -296,17 +486,21 @@ export default {
             tempVoiceId
           );
 
+
         console.log(
           "✅ English audio generated. Bytes:",
           clonedVoiceBuffer.byteLength
         );
 
 
-        // ------------------------------------------------------
-        // Send voice to Telegram
-        // ------------------------------------------------------
+        // ======================================================
+        // STEP 8 — Send voice to Telegram
+        // ======================================================
 
-        console.log("7️⃣ Sending voice to Telegram...");
+        console.log(
+          "7️⃣ Sending voice to Telegram..."
+        );
+
 
         await sendTelegramVoice(
           env.BOT_TOKEN,
@@ -314,12 +508,15 @@ export default {
           clonedVoiceBuffer
         );
 
-        console.log("✅ Voice sent successfully");
+
+        console.log(
+          "✅ VOICE SENT SUCCESSFULLY"
+        );
 
 
-        // ------------------------------------------------------
-        // Delete temporary ElevenLabs voice
-        // ------------------------------------------------------
+        // ======================================================
+        // STEP 9 — Delete temporary voice
+        // ======================================================
 
         ctx.waitUntil(
           deleteInstantVoice(
@@ -328,43 +525,71 @@ export default {
           )
         );
 
+
         console.log(
-          "🗑️ Temporary ElevenLabs voice deletion scheduled"
+          "🗑️ Temporary voice deletion scheduled"
         );
 
 
-        return new Response("OK", { status: 200 });
+        return new Response("OK", {
+          status: 200
+        });
       }
 
 
       // ========================================================
-      // Unsupported Telegram message
+      // 11. UNSUPPORTED MESSAGE TYPE
       // ========================================================
 
-      console.log("⚠️ Unsupported Telegram message type");
+      console.log(
+        "⚠️ Unsupported Telegram message type"
+      );
+
 
       await sendTelegramMessage(
         env.BOT_TOKEN,
         chatId,
+
         "🎤 فقط ویس فارسی ارسال کن."
       );
 
 
-      return new Response("OK", { status: 200 });
+      return new Response("OK", {
+        status: 200
+      });
 
 
     } catch (error) {
 
-      console.error("========================================");
-      console.error("❌ WORKER ERROR");
-      console.error(error);
-      console.error("MESSAGE:", error?.message);
-      console.error("STACK:", error?.stack);
-      console.error("========================================");
+      // ========================================================
+      // ERROR HANDLER
+      // ========================================================
+
+      console.error(
+        "========================================"
+      );
+
+      console.error(
+        "❌ BOT ERROR"
+      );
+
+      console.error(
+        "ERROR MESSAGE:",
+        error?.message
+      );
+
+      console.error(
+        "ERROR STACK:",
+        error?.stack
+      );
+
+      console.error(
+        "========================================"
+      );
 
 
       // --------------------------------------------------------
-      // Try to notify user
+      // Try to notify Telegram user
       // --------------------------------------------------------
 
       try {
@@ -372,34 +597,41 @@ export default {
         const chatId =
           update?.message?.chat?.id;
 
-        if (chatId) {
+
+        if (
+          chatId &&
+          hasBotToken
+        ) {
 
           await sendTelegramMessage(
             env.BOT_TOKEN,
             chatId,
-            "❌ متأسفانه هنگام پردازش ویس خطایی رخ داد.\n\nلطفاً دوباره امتحان کن."
-          );
 
+            "❌ متأسفانه هنگام پردازش ویس خطایی رخ داد.\n\n" +
+            "لطفاً دوباره امتحان کن."
+          );
         }
 
       } catch (telegramError) {
 
         console.error(
           "❌ ERROR SENDING ERROR MESSAGE:",
-          telegramError
+          telegramError?.message
         );
       }
 
 
       // Telegram should receive 200
-      return new Response("OK", { status: 200 });
+      return new Response("OK", {
+        status: 200
+      });
     }
   }
 };
 
 
 // ============================================================
-// Telegram: sendMessage
+// Telegram — sendMessage
 // ============================================================
 
 async function sendTelegramMessage(
@@ -408,34 +640,50 @@ async function sendTelegramMessage(
   text
 ) {
 
-  console.log("📨 Telegram sendMessage");
-
-  const response = await fetch(
-    `https://api.telegram.org/bot${token}/sendMessage`,
-    {
-      method: "POST",
-
-      headers: {
-        "Content-Type": "application/json"
-      },
-
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: text
-      })
-    }
+  console.log(
+    "📨 Telegram sendMessage"
   );
 
 
-  const data = await response.json();
+  const response =
+    await fetch(
+      `https://api.telegram.org/bot${token}/sendMessage`,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
+
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: text
+        })
+      }
+    );
+
+
+  const data =
+    await response.json();
+
 
   console.log(
-    "Telegram sendMessage response:",
-    JSON.stringify(data)
+    "Telegram sendMessage status:",
+    response.status
   );
 
 
-  if (!response.ok || !data.ok) {
+  console.log(
+    "Telegram sendMessage ok:",
+    data?.ok
+  );
+
+
+  if (
+    !response.ok ||
+    !data.ok
+  ) {
 
     throw new Error(
       "Telegram sendMessage failed: " +
@@ -443,12 +691,13 @@ async function sendTelegramMessage(
     );
   }
 
+
   return data;
 }
 
 
 // ============================================================
-// Telegram: getFile
+// Telegram — getFile
 // ============================================================
 
 async function getTelegramFileUrl(
@@ -456,20 +705,32 @@ async function getTelegramFileUrl(
   fileId
 ) {
 
-  const response = await fetch(
-    `https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`
-  );
+  const response =
+    await fetch(
+      `https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`
+    );
 
 
-  const data = await response.json();
+  const data =
+    await response.json();
+
 
   console.log(
-    "Telegram getFile response:",
-    JSON.stringify(data)
+    "Telegram getFile status:",
+    response.status
   );
 
 
-  if (!response.ok || !data.ok) {
+  console.log(
+    "Telegram getFile ok:",
+    data?.ok
+  );
+
+
+  if (
+    !response.ok ||
+    !data.ok
+  ) {
 
     throw new Error(
       "Telegram getFile failed: " +
@@ -478,7 +739,8 @@ async function getTelegramFileUrl(
   }
 
 
-  const filePath = data.result.file_path;
+  const filePath =
+    data.result.file_path;
 
 
   return (
@@ -493,7 +755,9 @@ async function getTelegramFileUrl(
 
 async function downloadFile(url) {
 
-  const response = await fetch(url);
+  const response =
+    await fetch(url);
+
 
   console.log(
     "Telegram download status:",
@@ -514,7 +778,7 @@ async function downloadFile(url) {
 
 
 // ============================================================
-// OpenAI Whisper
+// OpenAI — Whisper
 // ============================================================
 
 async function transcribeAudioWithOpenAI(
@@ -522,15 +786,17 @@ async function transcribeAudioWithOpenAI(
   apiKey
 ) {
 
-  const formData = new FormData();
+  const formData =
+    new FormData();
 
 
-  const blob = new Blob(
-    [audioBuffer],
-    {
-      type: "audio/ogg"
-    }
-  );
+  const blob =
+    new Blob(
+      [audioBuffer],
+      {
+        type: "audio/ogg"
+      }
+    );
 
 
   formData.append(
@@ -552,26 +818,29 @@ async function transcribeAudioWithOpenAI(
   );
 
 
-  const response = await fetch(
-    "https://api.openai.com/v1/audio/transcriptions",
-    {
-      method: "POST",
+  const response =
+    await fetch(
+      "https://api.openai.com/v1/audio/transcriptions",
+      {
+        method: "POST",
 
-      headers: {
-        "Authorization": `Bearer ${apiKey}`
-      },
+        headers: {
+          "Authorization":
+            `Bearer ${apiKey}`
+        },
 
-      body: formData
-    }
-  );
+        body: formData
+      }
+    );
 
 
-  const data = await response.json();
+  const data =
+    await response.json();
 
 
   console.log(
-    "OpenAI Whisper response:",
-    JSON.stringify(data)
+    "OpenAI Whisper status:",
+    response.status
   );
 
 
@@ -589,7 +858,7 @@ async function transcribeAudioWithOpenAI(
 
 
 // ============================================================
-// OpenAI Translation
+// OpenAI — Translation
 // ============================================================
 
 async function translateText(
@@ -597,51 +866,57 @@ async function translateText(
   apiKey
 ) {
 
-  const response = await fetch(
-    "https://api.openai.com/v1/chat/completions",
-    {
-      method: "POST",
+  const response =
+    await fetch(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        method: "POST",
 
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
+        headers: {
+          "Authorization":
+            `Bearer ${apiKey}`,
 
-      body: JSON.stringify({
+          "Content-Type":
+            "application/json"
+        },
 
-        model: "gpt-4o-mini",
+        body: JSON.stringify({
 
-        messages: [
+          model:
+            "gpt-4o-mini",
 
-          {
-            role: "system",
+          messages: [
 
-            content:
-              "You are a professional Persian to English translator. " +
-              "Translate the Persian text into natural, fluent, spoken English. " +
-              "Preserve the meaning and emotion. " +
-              "Do not explain anything. " +
-              "Output only the English translation."
-          },
+            {
+              role: "system",
 
-          {
-            role: "user",
-            content: text
-          }
+              content:
+                "You are a professional Persian to English translator. " +
+                "Translate the Persian text into natural, fluent, spoken English. " +
+                "Preserve the meaning and emotion. " +
+                "Do not explain anything. " +
+                "Output only the English translation."
+            },
 
-        ]
+            {
+              role: "user",
+              content: text
+            }
 
-      })
-    }
-  );
+          ]
+
+        })
+      }
+    );
 
 
-  const data = await response.json();
+  const data =
+    await response.json();
 
 
   console.log(
-    "OpenAI translation response:",
-    JSON.stringify(data)
+    "OpenAI translation status:",
+    response.status
   );
 
 
@@ -662,7 +937,7 @@ async function translateText(
 
 
 // ============================================================
-// ElevenLabs: Create temporary voice clone
+// ElevenLabs — Create temporary voice clone
 // ============================================================
 
 async function createInstantVoice(
@@ -670,15 +945,17 @@ async function createInstantVoice(
   apiKey
 ) {
 
-  const formData = new FormData();
+  const formData =
+    new FormData();
 
 
-  const blob = new Blob(
-    [audioBuffer],
-    {
-      type: "audio/ogg"
-    }
-  );
+  const blob =
+    new Blob(
+      [audioBuffer],
+      {
+        type: "audio/ogg"
+      }
+    );
 
 
   formData.append(
@@ -694,26 +971,29 @@ async function createInstantVoice(
   );
 
 
-  const response = await fetch(
-    "https://api.elevenlabs.io/v1/voices/add",
-    {
-      method: "POST",
+  const response =
+    await fetch(
+      "https://api.elevenlabs.io/v1/voices/add",
+      {
+        method: "POST",
 
-      headers: {
-        "xi-api-key": apiKey
-      },
+        headers: {
+          "xi-api-key":
+            apiKey
+        },
 
-      body: formData
-    }
-  );
+        body: formData
+      }
+    );
 
 
-  const data = await response.json();
+  const data =
+    await response.json();
 
 
   console.log(
-    "ElevenLabs voice creation response:",
-    JSON.stringify(data)
+    "ElevenLabs voice creation status:",
+    response.status
   );
 
 
@@ -731,7 +1011,7 @@ async function createInstantVoice(
 
 
 // ============================================================
-// ElevenLabs: Text → Speech
+// ElevenLabs — Text → Speech
 // ============================================================
 
 async function generateClonedVoice(
@@ -740,47 +1020,56 @@ async function generateClonedVoice(
   voiceId
 ) {
 
-  const response = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-    {
-      method: "POST",
+  const response =
+    await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      {
+        method: "POST",
 
-      headers: {
+        headers: {
 
-        "xi-api-key": apiKey,
+          "xi-api-key":
+            apiKey,
 
-        "Content-Type":
-          "application/json",
+          "Content-Type":
+            "application/json",
 
-        "Accept":
-          "audio/mpeg"
+          "Accept":
+            "audio/mpeg"
+        },
 
-      },
+        body: JSON.stringify({
 
-      body: JSON.stringify({
+          text: text,
 
-        text: text,
+          model_id:
+            "eleven_multilingual_v2",
 
-        model_id:
-          "eleven_multilingual_v2",
+          voice_settings: {
 
-        voice_settings: {
+            stability:
+              0.5,
 
-          stability: 0.5,
+            similarity_boost:
+              0.75
+          }
 
-          similarity_boost: 0.75
-
-        }
-
-      })
-    }
-  );
+        })
+      }
+    );
 
 
   if (!response.ok) {
 
     const errorText =
       await response.text();
+
+
+    console.error(
+      "ElevenLabs TTS status:",
+      response.status
+    );
+
 
     console.error(
       "ElevenLabs TTS error:",
@@ -800,7 +1089,7 @@ async function generateClonedVoice(
 
 
 // ============================================================
-// Telegram: sendVoice
+// Telegram — sendVoice
 // ============================================================
 
 async function sendTelegramVoice(
@@ -851,12 +1140,21 @@ async function sendTelegramVoice(
 
 
   console.log(
-    "Telegram sendVoice response:",
-    JSON.stringify(data)
+    "Telegram sendVoice status:",
+    response.status
   );
 
 
-  if (!response.ok || !data.ok) {
+  console.log(
+    "Telegram sendVoice ok:",
+    data?.ok
+  );
+
+
+  if (
+    !response.ok ||
+    !data.ok
+  ) {
 
     throw new Error(
       "Telegram sendVoice failed: " +
@@ -870,7 +1168,7 @@ async function sendTelegramVoice(
 
 
 // ============================================================
-// ElevenLabs: Delete temporary voice
+// ElevenLabs — Delete temporary voice
 // ============================================================
 
 async function deleteInstantVoice(
@@ -893,7 +1191,8 @@ async function deleteInstantVoice(
           method: "DELETE",
 
           headers: {
-            "xi-api-key": apiKey
+            "xi-api-key":
+              apiKey
           }
         }
       );
@@ -904,17 +1203,21 @@ async function deleteInstantVoice(
 
 
     console.log(
-      "ElevenLabs delete response:",
-      response.status,
-      text
+      "ElevenLabs delete status:",
+      response.status
     );
 
+
+    console.log(
+      "ElevenLabs delete response:",
+      text
+    );
 
   } catch (error) {
 
     console.error(
       "❌ Temporary voice deletion failed:",
-      error
+      error?.message
     );
   }
-  }
+}
